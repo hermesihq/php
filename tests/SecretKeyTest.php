@@ -8,7 +8,13 @@ use Hermesi\Exception\ConnectionException;
 use Hermesi\Hermesi;
 use Hermesi\RetryPolicy;
 use Hermesi\Tests\Support\TestServer;
+use Nyholm\Psr7\Response;
 use PHPUnit\Framework\TestCase;
+use Psr\Http\Client\ClientInterface;
+use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ResponseInterface;
+use Symfony\Component\VarDumper\Cloner\VarCloner;
+use Symfony\Component\VarDumper\Dumper\CliDumper;
 
 /** The secret key is the one thing in this package that must never be printed, logged or cached. */
 final class SecretKeyTest extends TestCase
@@ -40,6 +46,27 @@ final class SecretKeyTest extends TestCase
         foreach ($shown as $text) {
             self::assertStringNotContainsString(self::KEY, $text);
             self::assertStringNotContainsString('0123456789', $text);
+        }
+    }
+
+    public function testSymfonyVarDumperWhichIsWhatDdAndDumpAndLaravelErrorPagesUseDoesNotShowItEither(): void
+    {
+        // A client that has already made a request, so that the transport exists and holds the key too.
+        $used = new class implements ClientInterface {
+            public function sendRequest(RequestInterface $request): ResponseInterface
+            {
+                return new Response(202, [], (string) json_encode(TestServer::ACCEPTED));
+            }
+        };
+        $hermesi = new Hermesi(apiKey: self::KEY, baseUrl: 'https://hermesi.example', httpClient: $used, retry: new RetryPolicy(maxRetries: 0));
+        $hermesi->events->trigger('order.shipped', 'user_1');
+
+        $dumper = new CliDumper();
+        $cloner = new VarCloner();
+        foreach ([$hermesi, $hermesi->events, $hermesi->tokens] as $object) {
+            $dumped = (string) $dumper->dump($cloner->cloneVar($object), true);
+            self::assertStringNotContainsString(self::KEY, $dumped);
+            self::assertStringNotContainsString('0123456789', $dumped);
         }
     }
 

@@ -24,11 +24,10 @@ final class Transport
     private $sleep;
 
     /**
-     * @param \Closure(): string    $secret returns the secret key; a closure so that no dump of this object can print it
-     * @param callable(float): void $sleep  waits that many seconds
+     * @param callable(float): void $sleep waits that many seconds
      */
     public function __construct(
-        private readonly \Closure $secret,
+        private readonly Secret $secret,
         private readonly string $baseUrl,
         private readonly RetryPolicy $retry,
         private readonly ClientInterface $client,
@@ -90,7 +89,7 @@ final class Transport
     private function attempt(string $method, string $path, string $body, ?string $idempotencyKey): Answer
     {
         $request = $this->requests->createRequest($method, $this->baseUrl.$path)
-            ->withHeader('Authorization', 'Bearer '.($this->secret)())
+            ->withHeader('Authorization', 'Bearer '.$this->secret->reveal())
             ->withHeader('Accept', 'application/json')
             ->withHeader('Content-Type', 'application/json')
             ->withHeader('User-Agent', $this->userAgent)

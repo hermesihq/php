@@ -13,7 +13,8 @@ decision about notifications; that is the platform's job.
 - **A test mode** that sends nothing and records what you would have sent.
 - PHP 8.1 and later. CI runs 8.1 to 8.5.
 
-For Laravel, use the wrapper, `hermesihq/laravel` (planned): it adds the facade, a test fake and a queued job on top of this package.
+For Laravel, use the wrapper, [`hermesihq/laravel`](https://github.com/hermesihq/laravel): it adds the facade, a test fake and a queued job on top
+of this package.
 
 ## Install
 

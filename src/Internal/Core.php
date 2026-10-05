@@ -15,8 +15,8 @@ use Psr\Http\Message\RequestFactoryInterface;
 use Psr\Http\Message\StreamFactoryInterface;
 
 /**
- * What the resources share. Holds the secret key, so it cannot be dumped (`var_dump` and `print_r` show it redacted) or
- * serialised, and the key is hidden from stack traces on PHP 8.2 and later.
+ * What the resources share. The secret key is held in a {@see Secret}, so no dump of this object shows it, and this object cannot
+ * be serialised; the key is hidden from stack traces on PHP 8.2 and later.
  *
  * @internal
  */
@@ -30,13 +30,7 @@ final class Core
     /** @var list<SimulatedEvent> */
     private array $simulated = [];
     private int $counter = 0;
-    /**
-     * The key lives in a closure and not in a property: `var_export`, `(array)` and reflection on an object print every property,
-     * whatever `__debugInfo` says, and a closure shows none of what it captured.
-     *
-     * @var \Closure(): string
-     */
-    private readonly \Closure $secret;
+    private readonly Secret $secret;
     private readonly string $baseUrl;
     private ?Transport $transport = null;
 
@@ -73,8 +67,7 @@ final class Core
         if (!is_finite($timeout) || $timeout <= 0) {
             throw new \InvalidArgumentException('timeout must be above 0');
         }
-        $resolved = $key ?? '';
-        $this->secret = static fn (): string => $resolved;
+        $this->secret = new Secret($key ?? '');
         $this->baseUrl = rtrim($url ?? 'http://simulated.invalid', '/');
         $this->retry = $retry ?? new RetryPolicy();
         $this->sleep = $sleep ?? static function (float $seconds): void {
@@ -116,7 +109,7 @@ final class Core
 
     public function mint(string $externalId, string $environmentId, int $ttlSeconds): string
     {
-        $key = ($this->secret)();
+        $key = $this->secret->reveal();
 
         return SubscriberToken::mint('' === $key ? 'hm_sk_simulated' : $key, $externalId, $environmentId, $ttlSeconds);
     }

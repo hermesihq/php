@@ -29,7 +29,7 @@ final class TestServer
     {
         $server = new self();
         $server->reset();
-        $command = [\PHP_BINARY, __DIR__.'/server.php', $server->dir];
+        $command = [\PHP_BINARY, __DIR__.'/server.php', $server->dir, (string) getmypid()];
         $process = proc_open($command, [0 => ['file', '/dev/null', 'r'], 1 => ['file', '/dev/null', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);
         if (!\is_resource($process)) {
             throw new \RuntimeException('Could not start the test server');

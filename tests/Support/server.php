@@ -29,9 +29,16 @@ rename($dir.'/port.tmp', $dir.'/port');
 /** @var list<resource> $held connections kept open and never answered */
 $held = [];
 
+// If the test process dies (a fatal error, a kill), this server must not outlive it: an orphan holds the terminal, or a CI
+// container, open forever.
+$parent = (int) ($argv[2] ?? 0);
+
 while (true) {
-    $conn = @stream_socket_accept($server, -1);
+    $conn = @stream_socket_accept($server, 1);
     if (false === $conn) {
+        if ($parent > 0 && function_exists('posix_kill') && !posix_kill($parent, 0)) {
+            exit(0);
+        }
         continue;
     }
     stream_set_timeout($conn, 5);
