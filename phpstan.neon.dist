@@ -1,0 +1,18 @@
+parameters:
+    level: max
+    paths:
+        - src
+        - tests
+    excludePaths:
+        # A standalone script the tests run as a process, not code the package ships.
+        - tests/Support/server.php
+    # A caller who ignores the docblock types is the reason for the runtime checks, so they must not be reported as dead code.
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        # Guzzle and Symfony are optional: the checks are real at runtime, and only look redundant where they are installed.
+        -
+            identifier: function.alreadyNarrowedType
+            path: src/Internal/HttpClients.php
+        -
+            identifier: varTag.nativeType
+            path: src/Internal/HttpClients.php
