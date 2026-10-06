@@ -72,8 +72,17 @@ key. For that, give the event a key derived from what happened, such as `order-4
 
 ### Other arguments
 
-`actor: new Actor(externalId: ..., name: ...)`, `delay: '15m'`, `sendAt: new DateTimeImmutable(...)`, `override: [...]`,
+`actor: new Actor(externalId: ..., name: ...)`, `delay: 'PT15M'`, `sendAt: new DateTimeImmutable(...)`, `override: [...]`,
 `tenant: '...'`. They are named arguments, so you pass only what you need.
+
+### Scheduling
+
+`delay` holds the event back for an ISO 8601 duration (`PT15M`, `PT1H30M`, `P1D`: **not** `15m`) and `sendAt` until an instant
+(a `DateTimeInterface`, which always carries its offset, or an ISO 8601 string with one). Give one, not both, at most 30 days ahead. A time already past runs at once. The run starts within about a minute after
+its time, not at the second. A request the server cannot honour is refused with `422 invalid_schedule`: it is never sent
+immediately instead. Pass your own idempotency key and retrying a scheduled event does not schedule it twice.
+
+`override` and `tenant` are accepted by the API but not acted on yet.
 
 ### Your data, and what PHP's `json_encode` does to it
 
