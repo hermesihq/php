@@ -53,7 +53,7 @@ final class Transport
     /**
      * One call, with retries. Returns a 2xx answer; throws an ApiException or a ConnectionException otherwise.
      */
-    public function send(string $method, string $path, string $body, ?string $idempotencyKey): Answer
+    public function send(string $method, string $path, ?string $body, ?string $idempotencyKey): Answer
     {
         $retries = 0;
         while (true) {
@@ -86,14 +86,17 @@ final class Transport
         }
     }
 
-    private function attempt(string $method, string $path, string $body, ?string $idempotencyKey): Answer
+    private function attempt(string $method, string $path, ?string $body, ?string $idempotencyKey): Answer
     {
         $request = $this->requests->createRequest($method, $this->baseUrl.$path)
             ->withHeader('Authorization', 'Bearer '.$this->secret->reveal())
             ->withHeader('Accept', 'application/json')
-            ->withHeader('Content-Type', 'application/json')
-            ->withHeader('User-Agent', $this->userAgent)
-            ->withBody($this->streams->createStream($body));
+            ->withHeader('User-Agent', $this->userAgent);
+        if (null !== $body) {
+            $request = $request
+                ->withHeader('Content-Type', 'application/json')
+                ->withBody($this->streams->createStream($body));
+        }
         if (null !== $idempotencyKey && '' !== $idempotencyKey) {
             $request = $request->withHeader('Idempotency-Key', $idempotencyKey);
         }

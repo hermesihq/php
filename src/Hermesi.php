@@ -25,6 +25,7 @@ final class Hermesi
 {
     public readonly Events $events;
     public readonly Subscribers $subscribers;
+    public readonly Messages $messages;
     public readonly Tokens $tokens;
     private readonly Core $core;
 
@@ -33,7 +34,7 @@ final class Hermesi
      * @param string|null                $baseUrl  where Hermesi runs, for example `https://your-hermesi-host`; read from HERMESI_BASE_URL if null
      * @param float                      $timeout  seconds one attempt may take. Applies to the client this package builds; a client you pass
      *                                             keeps its own timeout, because PSR-18 has no way to set one
-     * @param bool                       $simulate send nothing: record the events, see {@see self::simulated()}. No key or URL needed
+     * @param bool                       $simulate send nothing: record the events, see {@see self::simulated()}, and every other write, see {@see self::simulatedCalls()}. No key or URL needed
      * @param callable(float): void|null $sleep    how retries wait, in seconds; for tests
      */
     public function __construct(
@@ -51,6 +52,7 @@ final class Hermesi
         $this->core = new Core($apiKey, $baseUrl, $timeout, $retry, $simulate, $httpClient, $requestFactory, $streamFactory, $sleep);
         $this->events = new Events($this->core);
         $this->subscribers = new Subscribers($this->core);
+        $this->messages = new Messages($this->core);
         $this->tokens = new Tokens($this->core);
     }
 
@@ -68,6 +70,17 @@ final class Hermesi
     public function simulated(): array
     {
         return $this->core->simulated();
+    }
+
+    /**
+     * Every other write recorded by `simulate: true` (subscribers, channels, preferences, messages), oldest first. A read
+     * (`events->get`, `subscribers->get`, `messages->get`...) throws a SimulationException: there is nothing to read.
+     *
+     * @return list<SimulatedCall>
+     */
+    public function simulatedCalls(): array
+    {
+        return $this->core->simulatedCalls();
     }
 
     /** @return array<string, mixed> */

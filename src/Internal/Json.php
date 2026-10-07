@@ -40,9 +40,9 @@ final class Json
     }
 
     /**
-     * @param array<mixed> $body the request body: every key is already a JSON object key
+     * @param array<mixed>|\stdClass $body the request body: every key is already a JSON object key
      */
-    public static function encode(array $body): string
+    public static function encode(array|\stdClass $body): string
     {
         try {
             return json_encode(
@@ -50,7 +50,7 @@ final class Json
                 \JSON_THROW_ON_ERROR | \JSON_UNESCAPED_SLASHES | \JSON_UNESCAPED_UNICODE | \JSON_PRESERVE_ZERO_FRACTION,
             );
         } catch (\JsonException $e) {
-            throw new \InvalidArgumentException('The event could not be encoded as JSON: '.$e->getMessage(), 0, $e);
+            throw new \InvalidArgumentException('The request could not be encoded as JSON: '.$e->getMessage(), 0, $e);
         }
     }
 

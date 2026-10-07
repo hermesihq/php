@@ -1,6 +1,7 @@
 # hermesihq/hermesi
 
-Server-side client for [Hermesi](https://github.com/hermesihq): publish events, mint subscriber tokens and preference links.
+Server-side client for [Hermesi](https://github.com/hermesihq): publish events and read what became of them, keep your
+subscribers in sync, send a direct message, mint subscriber tokens and preference links.
 Thin on purpose: it builds the request, sends it with retries, and turns the answer into a typed result or an exception. It makes no
 decision about notifications; that is the platform's job.
 
@@ -97,6 +98,89 @@ A notification payload is where PHP's own JSON encoding hurts, so this package d
 - **Refused before anything is sent**, naming the path (`payload.order.total`): `NAN` and `INF`, a closure, a resource, an enum without a
   value, an object that is none of the above, a string that is not UTF-8, and anything nested more than 64 levels (a cycle).
 
+## Read back what became of an event
+
+```php
+$run = $hermesi->events->get($result->eventId);
+
+$run->status; // 'processed', 'no_workflow' (nothing matched) or 'invalid' (a strict payload schema refused it)
+foreach ($run->notifications as $notification) { // one per recipient
+    $notification->externalId; $notification->workflow; $notification->status;
+    foreach ($notification->messages as $message) {
+        $message->channel; $message->status; $message->provider; $message->failureCode;
+        $message->isFinal; // true once nothing more will happen to it
+    }
+}
+$run->messages(); // every message of every notification, flattened
+```
+
+A message's status moves on after the event was accepted (`queued`, `sent`, `delivered`, ...), so poll it rather than treating the first
+answer as final. It never returns what was sent or the recipient's address, and an event of another environment is a `NotFoundException`.
+
+## Keep your subscribers in sync
+
+```php
+$hermesi->subscribers->put('user_8821', [
+    'email' => 'amina@example.cm',
+    'phone_e164' => '+237690000000',
+    'first_name' => 'Amina',
+    'locale' => 'fr',
+    'timezone' => 'Africa/Douala',
+    'data' => ['plan' => 'pro'],
+]);
+$hermesi->subscribers->put('user_8821', ['locale' => 'en']);        // only the locale changes: the rest is left alone
+$hermesi->subscribers->put('user_8821', ['phone_e164' => null]);    // null clears one field
+$profile = $hermesi->subscribers->get('user_8821');                 // profile, channel identities, stored preference overrides
+$hermesi->subscribers->patch('user_8821', ['locale' => 'fr']);      // like put, but NotFoundException if the subscriber does not exist
+$hermesi->subscribers->delete('user_8821');                         // erase the personal data; idempotent
+```
+
+**A key you give is set, `null` clears the field, and a key you leave out is left alone**, so a sync job that knows half a profile does
+not blank the other half. `data` replaces the stored attributes, up to 32 KB; it is not merged. A key the SDK does not know
+(`phoneE164` instead of `phone_e164`) is an `\InvalidArgumentException` rather than a value silently dropped. The server checks the
+shapes (an email looks like one, `phone_e164` is E.164, `locale` a language tag, `timezone` an IANA name) and refuses what it does not
+know, as a `ValidationException` naming the field.
+
+`delete` removes the email, phone, names, attributes, channel identities and preferences, and replaces the address on every message the
+person received by `[deleted]`, keeping the messages and their status for your statistics. Inbox items, the stored text of messages and
+event payloads are **not** erased yet.
+
+```php
+$hermesi->subscribers->registerChannel('user_8821', 'push', $deviceToken, ['platform' => 'android']); // on every app start
+$hermesi->subscribers->removeChannel('user_8821', 'push', $deviceToken);
+
+$hermesi->subscribers->updatePreferences('user_8821', global: ['sms' => false], categories: ['marketing' => ['email' => false, 'push' => null]]);
+$hermesi->subscribers->preferences('user_8821')->categories; // ['marketing' => ['email' => false]]
+```
+
+`registerChannel` refreshes the identity and makes it active again if a provider had marked it invalid; it never duplicates it. In
+`updatePreferences`, `true` or `false` sets an override and `null` removes it, so the category's default applies again. It is all or
+nothing: an unknown category (`NotFoundException`) or a critical one (`ValidationException`) refuses the whole update.
+
+## Send one message on a channel you choose
+
+Almost everything should be an event: you say what happened and Hermesi decides the channels. When the channel is a requirement instead
+(an OTP that must be an SMS), send one message through one template:
+
+```php
+$result = $hermesi->messages->send(
+    'sms', 'user_8821', 'otp-code',
+    data: ['code' => '480219'], category: 'security', priority: 'critical',
+    idempotencyKey: 'otp-user_8821-482',
+);
+$result->status;   // 'queued', or 'skipped' / 'suppressed' if the recipient's preferences or a suppression refused it
+$result->messages; // one per destination: a push to three devices is three messages
+$hermesi->messages->get($result->messageId)->isFinal;
+```
+
+It skips the workflow and nothing else: preferences, suppressions and the audit trail still apply, and a refused message is a result you
+can read, not an exception. A mistake (an unknown template, a template with no variant for the channel, an unknown recipient) is thrown
+and creates nothing. The wording lives in a published template; `data` becomes its `payload.*` and is not kept once a provider has the
+message. There is no inline `content`: it would put copy back in your code.
+
+**Pass your own `idempotencyKey` when your code can run twice.** One is generated and kept across the retries if you give none, so a
+timeout cannot send a second SMS, but only your own key survives your code running again.
+
 ## Subscriber tokens
 
 A browser or an app talks to Hermesi's client API as one subscriber, with a token minted on **your** server:
@@ -182,6 +266,11 @@ $hermesi->simulated()[0]->payload; // ['order_id' => '4821'], as it would have b
 A simulated call validates and serialises exactly as a real one does, so a payload that would fail in production fails in your test. It
 does not know your workflows: it cannot tell you whether an event matches one.
 
+Writes that are not events (`subscribers->put`, `messages->send`, `registerChannel`, ...) are recorded in `$hermesi->simulatedCalls()`
+(method, path, body, idempotency key) and answered with a plausible result (`status === 'simulated'` for a message). **Reads
+(`events->get`, `subscribers->get`, `messages->get`, ...) throw `SimulationException`**: nothing was sent, so there is nothing to read, and an
+invented answer would make a test pass for the wrong reason.
+
 ## The key never shows
 
 The client holds your secret key, so it is built not to leak it: `var_dump`, `print_r`, `var_export`, `json_encode` and `(array)` do not
@@ -190,8 +279,9 @@ stack traces. On 8.1, leave `zend.exception_ignore_args` on in production, which
 
 ## Not included
 
-There is no method for messages or subscribers beyond the preference link, because Hermesi's secret-key API does not have them yet: those
-are the dashboard's (Management) API. Outbound webhooks are not implemented in Hermesi yet either, so there is nothing to verify.
+Bulk subscriber import (a later phase of Hermesi), the dashboard's Management API (workflows, templates, providers) and inline `content`
+for a direct message (Hermesi refuses it on purpose). Outbound webhooks are not implemented in Hermesi yet either, so there is nothing to
+verify.
 
 ## Development
 
