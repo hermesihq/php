@@ -62,6 +62,7 @@ class ApiException extends HermesiException
             401 === $status => AuthenticationException::class,
             403 === $status => ForbiddenException::class,
             404 === $status => NotFoundException::class,
+            409 === $status => ConflictException::class,
             429 === $status => RateLimitException::class,
             $status >= 500 => ServerException::class,
             default => self::class,

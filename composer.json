@@ -1,6 +1,6 @@
 {
     "name": "hermesihq/hermesi",
-    "description": "Server-side client for Hermesi: publish events, mint subscriber tokens and preference links. Works with any PSR-18 HTTP client.",
+    "description": "Server-side client for Hermesi: publish events and read what became of them, keep subscribers in sync, send a direct message, mint subscriber tokens and preference links. Works with any PSR-18 HTTP client.",
     "type": "library",
     "license": "MIT",
     "keywords": ["hermesi", "notifications", "sdk", "psr-18", "push", "email"],

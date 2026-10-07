@@ -7,6 +7,18 @@ lists breaking changes first.
 
 ## Unreleased
 
+### Added
+
+- **`events->get($eventId)`**: the notification each recipient got from an event and the messages each produced, with how far each
+  got. `EventRun`, `RunNotification`, `Message` (`isFinal` tells when nothing more will happen).
+- **Subscribers**: `subscribers->put`, `patch`, `get`, `delete`, `registerChannel`, `removeChannel`, `preferences` and
+  `updatePreferences`. A key you give is set, `null` clears the field and a key you leave out is left alone; `data` replaces. An unknown
+  key is an `\InvalidArgumentException`. `SubscriberProfile`, `ChannelIdentity`, `Preferences`.
+- **`messages->send` and `messages->get`**: the direct send, for when the channel is a requirement (an OTP that must be an SMS). It keeps
+  one idempotency key across its retries, generated if you give none. `MessageResult`.
+- `ConflictException` for a `409` (it used to be a bare `ApiException`), `SimulationException`, `simulatedCalls()` and `SimulatedCall`
+  for test mode. In test mode reads throw rather than invent an answer.
+
 ### Fixed
 
 - **The documentation showed `delay: '15m'`**, a format the server does not accept: `delay` is an ISO 8601 duration, `'PT15M'`.

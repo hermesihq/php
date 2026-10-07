@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace Hermesi\Internal;
 
 use Hermesi\EventResult;
+use Hermesi\Exception\ApiException;
+use Hermesi\Exception\SimulationException;
 use Hermesi\RetryPolicy;
+use Hermesi\SimulatedCall;
 use Hermesi\SimulatedEvent;
 use Hermesi\Subscriber;
 use Hermesi\SubscriberToken;
@@ -29,6 +32,8 @@ final class Core
 
     /** @var list<SimulatedEvent> */
     private array $simulated = [];
+    /** @var list<SimulatedCall> */
+    private array $simulatedCalls = [];
     private int $counter = 0;
     private readonly Secret $secret;
     private readonly string $baseUrl;
@@ -132,6 +137,61 @@ final class Core
     public function simulated(): array
     {
         return $this->simulated;
+    }
+
+    /** @return list<SimulatedCall> */
+    public function simulatedCalls(): array
+    {
+        return $this->simulatedCalls;
+    }
+
+    /**
+     * One call that is not an event: simulated, or sent and read.
+     *
+     * The body is encoded before the simulate branch, so a body that cannot be serialised fails in a test exactly as it would in
+     * production. `$simulated` is what `simulate: true` answers with, given a counter and the body as it would have gone out;
+     * `null` marks a read, which has no meaningful simulated answer, and an invented one would make a test pass for the wrong reason.
+     *
+     * @template T
+     *
+     * @param array<mixed>|\stdClass|null                 $body
+     * @param \Closure(int, array<string, mixed>): T|null $simulated
+     * @param \Closure(Answer): T                         $read
+     *
+     * @return T
+     */
+    public function call(string $method, string $path, array|\stdClass|null $body, ?string $idempotencyKey, ?\Closure $simulated, \Closure $read): mixed
+    {
+        $encoded = null === $body ? null : Json::encode($body);
+        if ($this->simulate) {
+            if (null === $simulated) {
+                throw new SimulationException(\sprintf('%s %s reads from Hermesi and this client is in simulate mode, so there is nothing to read', $method, $path));
+            }
+            ++$this->counter;
+            /** @var array<string, mixed>|null $sent */
+            $sent = null === $encoded ? null : json_decode($encoded, true, 512, \JSON_THROW_ON_ERROR);
+            $this->simulatedCalls[] = new SimulatedCall($method, $path, $sent, $idempotencyKey);
+
+            return $simulated($this->counter, $sent ?? []);
+        }
+
+        return $read($this->transport()->send($method, $path, $encoded, $idempotencyKey));
+    }
+
+    /**
+     * The answer as a JSON object that has the one field a result cannot exist without. A success that is not shaped like one is the
+     * server (or a proxy) misbehaving, and the caller should hear that, not read a made-up answer.
+     *
+     * @return array<string, mixed>
+     */
+    public static function object(Answer $answer, string $required): array
+    {
+        $decoded = $answer->json();
+        if (!\is_array($decoded) || !isset($decoded[$required])) {
+            throw ApiException::fromResponse($answer->status, null, null);
+        }
+
+        return Wire::map($decoded);
     }
 
     public function baseUrl(): string

@@ -7,6 +7,7 @@ namespace Hermesi\Tests;
 use Hermesi\Actor;
 use Hermesi\Exception\ApiException;
 use Hermesi\Exception\AuthenticationException;
+use Hermesi\Exception\ConflictException;
 use Hermesi\Exception\ForbiddenException;
 use Hermesi\Exception\HermesiException;
 use Hermesi\Exception\NotFoundException;
@@ -252,7 +253,7 @@ final class EventsTest extends ServerTestCase
         yield '429' => [429, RateLimitException::class, 'rate_limited'];
         yield '500' => [500, ServerException::class, 'internal_error'];
         yield '503' => [503, ServerException::class, 'unavailable'];
-        yield '409' => [409, ApiException::class, 'conflict'];
+        yield '409' => [409, ConflictException::class, 'idempotency_key_reused'];
     }
 
     /** @param class-string<ApiException> $class */

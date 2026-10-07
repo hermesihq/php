@@ -5,8 +5,12 @@ declare(strict_types=1);
 namespace Hermesi;
 
 use Hermesi\Exception\ApiException;
+use Hermesi\Internal\Answer;
 use Hermesi\Internal\Core;
 use Hermesi\Internal\Json;
+use Hermesi\Internal\Path;
+use Hermesi\Internal\Recipients;
+use Hermesi\Internal\Uuid;
 
 final class Events
 {
@@ -43,11 +47,11 @@ final class Events
         if ('' === $name) {
             throw new \InvalidArgumentException('name is required, for example order.shipped');
         }
-        $key = null === $idempotencyKey || '' === $idempotencyKey ? self::uuid() : $idempotencyKey;
+        $key = null === $idempotencyKey || '' === $idempotencyKey ? Uuid::v4() : $idempotencyKey;
 
         $body = [
             'name' => $name,
-            'recipient' => self::recipient($recipient),
+            'recipient' => Recipients::wire($recipient),
             'payload' => Json::object($payload, 'payload'),
         ];
         if (null !== $actor) {
@@ -94,39 +98,19 @@ final class Events
     }
 
     /**
-     * @param string|Subscriber|list<string|Subscriber> $recipient
+     * What became of an event: the notification each recipient got, the messages each produced and how far each got. A message's
+     * status moves on after the event was accepted, so poll it (`$message->isFinal`) rather than treating the first answer as
+     * final. It never returns what was sent or the recipient's address; an event of another environment is a NotFoundException.
      */
-    private static function recipient(string|Subscriber|array $recipient): mixed
+    public function get(string $eventId): EventRun
     {
-        if (\is_array($recipient)) {
-            if (!array_is_list($recipient)) {
-                throw new \InvalidArgumentException('recipient must be an externalId, a Subscriber, or a list of them');
-            }
-
-            return array_map(static fn (string|Subscriber $each): mixed => self::recipient($each), $recipient);
-        }
-        if (\is_string($recipient)) {
-            return $recipient;
-        }
-        $wire = ['external_id' => $recipient->externalId];
-        foreach (['email' => $recipient->email, 'phone_e164' => $recipient->phoneE164, 'name' => $recipient->name, 'locale' => $recipient->locale] as $field => $value) {
-            if (null !== $value) {
-                $wire[$field] = $value;
-            }
-        }
-        if (null !== $recipient->data) {
-            $wire['data'] = Json::object($recipient->data, 'recipient.data');
-        }
-
-        return $wire;
-    }
-
-    private static function uuid(): string
-    {
-        $bytes = random_bytes(16);
-        $bytes[6] = \chr(\ord($bytes[6]) & 0x0F | 0x40);
-        $bytes[8] = \chr(\ord($bytes[8]) & 0x3F | 0x80);
-
-        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+        return $this->core->call(
+            'GET',
+            '/v1/events/'.Path::segment($eventId, 'eventId'),
+            null,
+            null,
+            null,
+            static fn (Answer $answer): EventRun => EventRun::fromWire(Core::object($answer, 'event_id')),
+        );
     }
 }
