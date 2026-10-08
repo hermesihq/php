@@ -153,6 +153,28 @@ $hermesi->subscribers->updatePreferences('user_8821', global: ['sms' => false], 
 $hermesi->subscribers->preferences('user_8821')->categories; // ['marketing' => ['email' => false]]
 ```
 
+### Import many at once
+
+```php
+$result = $hermesi->subscribers->bulk([
+    ['external_id' => 'user_8821', 'email' => 'amina@example.cm', 'phone_e164' => '+237690000000', 'locale' => 'fr'],
+    ['external_id' => 'user_8822', 'email' => 'paul@example.cm', 'data' => ['plan' => 'free']],
+    ['external_id' => 'user_8823', 'phone_e164' => null],   // null clears, as in put
+]);
+$result->created; $result->updated;                          // 3, 0
+foreach ($result->subscribers as $row) { $row->externalId; $row->status; } // one per row, in order: 'created' or 'updated'
+```
+
+For a first import of your user table or a nightly sync: up to **1 000** rows per call (split a bigger file with `array_chunk($rows, 1000)`).
+Each row is an array with an `external_id` and any of the keys `put` takes, and **means exactly what the same `put` would**: a key you
+include is set (`null` clears it), a key you leave out is left alone, and `data` replaces. A key that is none of those is an
+`\InvalidArgumentException` naming the row.
+
+**All or nothing.** If the server finds any row invalid it throws a `ValidationException` that lists every problem with its row
+(`body.subscribers.17.email`) and **nothing was written**, so fix them all and send the same batch again. The same `external_id` twice, or
+more than 5 MB of `data` in total, is refused too. Every row is an idempotent upsert, so resending after a timeout changes nothing; a full
+batch takes a few seconds, so do not set a very short `timeout`.
+
 `registerChannel` refreshes the identity and makes it active again if a provider had marked it invalid; it never duplicates it. In
 `updatePreferences`, `true` or `false` sets an override and `null` removes it, so the category's default applies again. It is all or
 nothing: an unknown category (`NotFoundException`) or a critical one (`ValidationException`) refuses the whole update.
@@ -279,7 +301,7 @@ stack traces. On 8.1, leave `zend.exception_ignore_args` on in production, which
 
 ## Not included
 
-Bulk subscriber import (a later phase of Hermesi), the dashboard's Management API (workflows, templates, providers) and inline `content`
+The dashboard's Management API (workflows, templates, providers) and inline `content`
 for a direct message (Hermesi refuses it on purpose). Outbound webhooks are not implemented in Hermesi yet either, so there is nothing to
 verify.
 

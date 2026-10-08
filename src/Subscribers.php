@@ -45,6 +45,64 @@ final class Subscribers
         return $this->write('PATCH', $externalId, $fields);
     }
 
+    /**
+     * Create or update up to 1 000 subscribers in one request: a first import of your user table, or a nightly sync.
+     *
+     * Each row is an array with an `external_id` and any of the keys {@see self::put()} takes, and **means exactly what the same `put`
+     * would**: a key you include is set (`null` clears it), a key you leave out is left alone, `data` replaces. A key that is none of
+     * those is an \InvalidArgumentException naming the row.
+     *
+     * **All or nothing**: if the server finds any row invalid, a ValidationException lists every problem with the row it is on
+     * (`body.subscribers.17.email`) and nothing was written. The same `external_id` twice, more than 1 000 rows, or more than 5 MB of
+     * `data` in total are refused too: split a larger import into batches. Every row is an idempotent upsert, so sending the same
+     * batch again after a timeout is safe, and there is no idempotency key to manage. A full batch takes a few seconds: do not set a
+     * very short timeout.
+     *
+     * The result has one entry per row, in the order you sent them, saying whether each was `created` or `updated`.
+     *
+     * @param iterable<array<string, mixed>> $subscribers
+     */
+    public function bulk(iterable $subscribers): BulkSubscribersResult
+    {
+        $rows = [];
+        foreach ($subscribers as $row) {
+            $index = \count($rows);
+            if (!\is_array($row)) {
+                throw new \InvalidArgumentException(\sprintf('row %d must be an array with an external_id, got %s', $index, get_debug_type($row)));
+            }
+            $externalId = $row['external_id'] ?? null;
+            if (!\is_string($externalId) || '' === $externalId) {
+                throw new \InvalidArgumentException(\sprintf('row %d: external_id is required', $index));
+            }
+            unset($row['external_id']);
+            try {
+                $fields = self::profileBody($row);
+            } catch (\InvalidArgumentException $e) {
+                throw new \InvalidArgumentException(\sprintf('row %d: %s', $index, $e->getMessage()), 0, $e);
+            }
+            $rows[] = ['external_id' => Json::normalize($externalId, 'external_id')] + $fields;
+        }
+        if ([] === $rows) {
+            throw new \InvalidArgumentException('give at least one subscriber');
+        }
+
+        return $this->core->call(
+            'POST',
+            '/v1/subscribers/bulk',
+            ['subscribers' => $rows],
+            null,
+            static function (int $n, array $sent): BulkSubscribersResult {
+                $out = [];
+                foreach (\is_array($sent['subscribers'] ?? null) ? array_values($sent['subscribers']) : [] as $i => $row) {
+                    $out[] = new BulkSubscriberResult(\is_array($row) && \is_string($row['external_id'] ?? null) ? $row['external_id'] : '', \sprintf('sub_simulated_%d_%d', $n, $i), 'created');
+                }
+
+                return new BulkSubscribersResult(\count($out), 0, $out);
+            },
+            static fn (Answer $answer): BulkSubscribersResult => BulkSubscribersResult::fromWire(Core::object($answer, 'subscribers')),
+        );
+    }
+
     /** The profile, the channel identities and the stored preference overrides. A NotFoundException for an unknown or erased subscriber. */
     public function get(string $externalId): SubscriberProfile
     {
@@ -193,11 +251,15 @@ final class Subscribers
     }
 
     /**
+     * What was given: a value sets, `null` clears, a key left out is left out of the body so the server leaves the field alone. An
+     * unknown key is a typo that would otherwise be silently dropped.
+     *
      * @param array<mixed> $fields
+     *
+     * @return array<string, mixed>
      */
-    private function write(string $method, string $externalId, array $fields): SubscriberProfile
+    private static function profileBody(array $fields): array
     {
-        $path = '/v1/subscribers/'.Path::segment($externalId);
         $body = [];
         foreach ($fields as $name => $value) {
             if (!\in_array($name, self::PROFILE_FIELDS, true)) {
@@ -215,6 +277,17 @@ final class Subscribers
             }
             $body[$name] = null === $value ? null : Json::normalize($value, $name);
         }
+
+        return $body;
+    }
+
+    /**
+     * @param array<mixed> $fields
+     */
+    private function write(string $method, string $externalId, array $fields): SubscriberProfile
+    {
+        $path = '/v1/subscribers/'.Path::segment($externalId);
+        $body = self::profileBody($fields);
 
         return $this->core->call(
             $method,

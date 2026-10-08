@@ -416,4 +416,68 @@ final class LiveTest extends TestCase
         self::assertSame(422, (int) ($m[1] ?? 0));
         self::assertStringContainsString('inline_content_not_supported', $body);
     }
+
+    public function testABulkImportCreatesThenUpdatesAndEachRowMeansWhatAPutWould(): void
+    {
+        $live = $this->live();
+        [$a, $b, $c] = [self::unique(), self::unique(), self::unique()];
+
+        $first = $live->subscribers->bulk([
+            ['external_id' => $a, 'email' => 'Bulk.A@Example.test', 'first_name' => 'Aa', 'data' => ['plan' => 'pro']],
+            ['external_id' => $b, 'phone_e164' => '+237690000010', 'locale' => 'fr'],
+        ]);
+
+        self::assertSame([2, 0], [$first->created, $first->updated]);
+        self::assertSame([[$a, 'created'], [$b, 'created']], array_map(static fn ($r): array => [$r->externalId, $r->status], $first->subscribers));
+        self::assertSame('bulk.a@example.test', $live->subscribers->get($a)->email, 'lower-cased, as a put does');
+
+        $second = $live->subscribers->bulk([['external_id' => $a, 'first_name' => null, 'data' => ['seats' => 3]], ['external_id' => $b, 'locale' => 'en'], ['external_id' => $c]]);
+
+        self::assertSame(['updated', 'updated', 'created'], array_map(static fn ($r): string => $r->status, $second->subscribers));
+        $afterA = $live->subscribers->get($a);
+        $afterB = $live->subscribers->get($b);
+        self::assertSame(['bulk.a@example.test', null, ['seats' => 3]], [$afterA->email, $afterA->firstName, $afterA->data], 'left out kept, null cleared, data replaced');
+        self::assertSame(['+237690000010', 'en'], [$afterB->phoneE164, $afterB->locale]);
+        foreach ([$a, $b, $c] as $id) {
+            $live->subscribers->delete($id);
+        }
+    }
+
+    public function testOneInvalidRowRefusesTheWholeBatchAndWritesNothing(): void
+    {
+        $live = $this->live();
+        [$good, $bad] = [self::unique(), self::unique()];
+
+        try {
+            $live->subscribers->bulk([['external_id' => $good, 'email' => 'good@example.test'], ['external_id' => $bad, 'phone_e164' => '690000000']]);
+            self::fail('accepted');
+        } catch (ValidationException $e) {
+            self::assertTrue([] !== array_filter($e->details, static fn ($d): bool => str_contains((string) $d->field, 'subscribers.1.phone_e164')));
+        }
+        $this->expectException(NotFoundException::class);
+        $live->subscribers->get($good);
+    }
+
+    public function testTheSameIdTwiceInABatchIsRefused(): void
+    {
+        $id = self::unique();
+
+        try {
+            $this->live()->subscribers->bulk([['external_id' => $id], ['external_id' => $id]]);
+            self::fail('accepted');
+        } catch (ValidationException $e) {
+            self::assertStringContainsString('more than once', $e->getMessage().json_encode($e->details));
+        }
+    }
+
+    public function testAnIdWithCharactersAPathTreatsSpeciallyIsOrdinaryInABulkBody(): void
+    {
+        $live = $this->live();
+        $id = 'team/'.self::unique().' é?#';
+
+        $live->subscribers->bulk([['external_id' => $id, 'locale' => 'fr']]);
+
+        self::assertSame('fr', $live->subscribers->get($id)->locale);
+        $live->subscribers->delete($id);
+    }
 }
